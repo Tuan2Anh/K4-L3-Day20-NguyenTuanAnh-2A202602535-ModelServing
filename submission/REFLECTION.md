@@ -115,17 +115,27 @@ Khi hạ số luồng xuống `-t 7`, toàn bộ tính toán decode được gom
 > Bỏ trống nếu không làm. Xem `docs/bonus/README.md`. Đừng làm hết — **một** finding sâu
 > ăn điểm hơn năm bảng nông.
 
-**Đã làm:**
+**Đã làm:** B2 (`make sweep-ctx`), B3 (Reflection §6 before/after), B4 (Challenge C7: Prefill vs Context Length Scaling), B5 (Challenge C8: `make semantic-cache-offline`).
 
 **Numbers:**
 
 ```
-before:
-after:
-speedup:
+before:  1827.7 ms prefill at 256 tokens (140.1 tok/s)
+after:   69844.0 ms prefill at 8192 tokens (117.3 tok/s)
+speedup: 1.19x super-linear degradation (O(N^2) attention overhead vs linear)
+Semantic Cache (C8): 38% hit rate (3/8 hits), 0 ms latency on hit (100% compute saved)
 ```
 
 **Điều này nói lên gì mà deck chưa nói:**
+
+Trong slide lý thuyết, chúng ta học rằng context window lớn (8k, 32k, 128k) giúp đưa nhiều tài liệu vào RAG hơn. Tuy nhiên, số liệu thực nghiệm đo đạc từ `make sweep-ctx` phơi bày một cái giá đắt đỏ mà lý thuyết thường nói giảm: **Độ trễ TTFT bùng nổ theo cấp số phi tuyến (super-linear)**.
+
+Khi tăng context từ 256 lên 8192 tokens (gấp 32 lần), thời gian prefill không chỉ tăng 32 lần (~58 giây) mà thực tế tăng vọt lên **gần 70 giây (69.84s, gấp 38.2 lần, tức 1.19x so với tỷ lệ tuyến tính)**. Thông lượng prefill tụt từ 152 tok/s xuống còn 117 tok/s do chi phí tính toán ma trận Attention (N^2)$ bắt đầu lấn át.
+
+Điều này mang lại bài học kiến trúc sống còn cho RAG:
+1. **Không nhồi nhét chunk (Context Budgeting):** Nếu một hệ thống RAG nhồi 10-15 chunks (~6000 tokens), người dùng phải ngồi chờ hơn 45 giây chỉ để nhận token đầu tiên. Giải pháp đúng đắn là dùng Reranker lọc gọn còn 2-3 chunks chất lượng cao (<= 1500 tokens, TTFT <= 10s).
+2. **Cần tách biệt Prefill/Decode (Disaggregated Serving):** Prefill ở 8k tokens ngốn 100% tài nguyên CPU/GPU trong suốt 70 giây. Nếu gộp chung một server, tất cả luồng decode khác sẽ bị bỏ đói (starved) hoàn toàn trong 70 giây đó.
+3. **Giá trị của Semantic Cache (C8):** Qua thực nghiệm `make semantic-cache-offline`, tầng Cache ngữ nghĩa (Layer 1) chặn được 38% câu hỏi paraphrase phổ biến, trả lời ngay trong 0 ms và triệt tiêu hoàn toàn chi phí prefill/decode nặng nề này.
 
 ---
 
